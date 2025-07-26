@@ -29,7 +29,7 @@ def get_today_midnight_timestamp():
     return midnight.timestamp()
 
 def load_tokens(server_name):
-    if server_name == "IND":
+    if server_name == "ME":
         with open("token_ind.json", "r") as f:
             return json.load(f)
     elif server_name in {"BR", "US", "SAC", "NA"}:
