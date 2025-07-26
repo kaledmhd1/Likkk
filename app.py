@@ -104,7 +104,7 @@ def handle_requests():
 
             # تحديد رابط الإرسال
             if server_name == "ME":
-                url = f"https://razor-info.vercel.app/player-info?uid={uid}&region=me"
+                url = f"https://api.jeff-gherab.xyz/api/like/v1/send"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
