@@ -130,8 +130,7 @@ def make_request(encrypt, server_name, token):
         print(f"make_request: Unexpected status code {response.status_code}")
         return None
 
-    binary = bytes.fromhex(response.content.hex())
-    return decode_protobuf(binary)
+    return decode_protobuf(response.content)
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
@@ -182,3 +181,41 @@ def handle_requests():
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            loop.run_until_complete(send_multiple_requests(uid, server_name, url))
+            loop.close()
+
+            after = make_request(encrypt, server_name, token)
+            if after is None:
+                return {"error": "Failed to get player info after liking."}
+
+            jsone = MessageToJson(after)
+            data = json.loads(jsone)
+
+            after_like = int(data['AccountInfo']['Likes'])
+            id = int(data['AccountInfo']['UID'])
+            name = str(data['AccountInfo']['PlayerNickname'])
+
+            like_given = after_like - before_like
+            status = 1 if like_given != 0 else 2
+
+            if like_given > 0:
+                token_tracker[token][0] += 1
+                count += 1
+
+            remains = KEY_LIMIT - count
+
+            result = {
+                "LikesGivenByAPI": like_given,
+                "LikesafterCommand": after_like,
+                "LikesbeforeCommand": before_like,
+                "PlayerNickname": name,
+                "UID": id,
+                "status": status,
+                "remains": f"({remains}/{KEY_LIMIT})"
+            }
+            return result
+
+        result = process_request()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
