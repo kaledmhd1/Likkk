@@ -29,8 +29,9 @@ def load_tokens(server_name):
         with open("token_bd.json", "r") as f:
             return json.load(f)
 
-def make_request(uid, region):
+def make_request(uid, server_name):
     url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={server_name.lower()}"
+
 
     try:
         response = requests.get(url, timeout=10)
