@@ -1,4 +1,4 @@
-# this code was made by cutehack
+# this code was made by cutehack - Modified for Render by ChatGPT
 
 from flask import Flask, request, jsonify
 import asyncio
@@ -15,6 +15,7 @@ import uid_generator_pb2
 import time
 from collections import defaultdict
 from datetime import datetime
+import traceback
 
 app = Flask(__name__)
 
@@ -28,7 +29,7 @@ def get_today_midnight_timestamp():
     return midnight.timestamp()
 
 def load_tokens(server_name):
-    if server_name == "ME":
+    if server_name == "IND":
         with open("token_ind.json", "r") as f:
             return json.load(f)
     elif server_name in {"BR", "US", "SAC", "NA"}:
@@ -129,78 +130,85 @@ def decode_protobuf(binary):
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
-    uid = request.args.get("uid")
-    server_name = request.args.get("server_name", "").upper()
-    key = request.args.get("key")
+    try:
+        uid = request.args.get("uid")
+        server_name = request.args.get("server_name", "").upper()
+        key = request.args.get("key")
 
-    if key != "bngx":
-        return jsonify({"error": "Invalid or missing API key 🔑"}), 403
+        if key != "jenil":
+            return jsonify({"error": "Invalid or missing API key 🔑"}), 403
 
-    if not uid or not server_name:
-        return jsonify({"error": "UID and server_name are required"}), 400
+        if not uid or not server_name:
+            return jsonify({"error": "UID and server_name are required"}), 400
 
-    def process_request():
-        data = load_tokens(server_name)
-        token = data[0]['token']
-        encrypt = enc(uid)
+        def process_request():
+            data = load_tokens(server_name)
+            token = data[0]['token']
+            encrypt = enc(uid)
 
-        today_midnight = get_today_midnight_timestamp()
-        count, last_reset = token_tracker[token]
+            today_midnight = get_today_midnight_timestamp()
+            count, last_reset = token_tracker[token]
 
-        if last_reset < today_midnight:
-            token_tracker[token] = [0, time.time()]
-            count = 0
+            if last_reset < today_midnight:
+                token_tracker[token] = [0, time.time()]
+                count = 0
 
-        if count >= KEY_LIMIT:
-            return {
-                "error": "Daily request limit reached for this key.",
-                "status": 429,
-                "remains": f"(0/{KEY_LIMIT})"
+            if count >= KEY_LIMIT:
+                return {
+                    "error": "Daily request limit reached for this key.",
+                    "status": 429,
+                    "remains": f"(0/{KEY_LIMIT})"
+                }
+
+            before = make_request(encrypt, server_name, token)
+            jsone = MessageToJson(before)
+            data = json.loads(jsone)
+            before_like = int(data['AccountInfo'].get('Likes', 0))
+
+            # Select URL
+            if server_name == "IND":
+                url = "https://client.ind.freefiremobile.com/LikeProfile"
+            elif server_name in {"BR", "US", "SAC", "NA"}:
+                url = "https://client.us.freefiremobile.com/LikeProfile"
+            else:
+                url = "https://clientbp.ggblueshark.com/LikeProfile"
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(send_multiple_requests(uid, server_name, url))
+            loop.close()
+
+            after = make_request(encrypt, server_name, token)
+            jsone = MessageToJson(after)
+            data = json.loads(jsone)
+
+            after_like = int(data['AccountInfo']['Likes'])
+            id = int(data['AccountInfo']['UID'])
+            name = str(data['AccountInfo']['PlayerNickname'])
+
+            like_given = after_like - before_like
+            status = 1 if like_given != 0 else 2
+
+            if like_given > 0:
+                token_tracker[token][0] += 1
+                count += 1
+
+            remains = KEY_LIMIT - count
+
+            result = {
+                "LikesGivenByAPI": like_given,
+                "LikesafterCommand": after_like,
+                "LikesbeforeCommand": before_like,
+                "PlayerNickname": name,
+                "UID": id,
+                "status": status,
+                "remains": f"({remains}/{KEY_LIMIT})"
             }
+            return result
 
-        before = make_request(encrypt, server_name, token)
-        jsone = MessageToJson(before)
-        data = json.loads(jsone)
-        before_like = int(data['AccountInfo'].get('Likes', 0))
+        result = process_request()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
-        # Select URL
-        if server_name == "IND":
-            url = "https://client.ind.freefiremobile.com/LikeProfile"
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            url = "https://client.us.freefiremobile.com/LikeProfile"
-        else:
-            url = "https://clientbp.ggblueshark.com/LikeProfile"
-
-        asyncio.run(send_multiple_requests(uid, server_name, url))
-
-        after = make_request(encrypt, server_name, token)
-        jsone = MessageToJson(after)
-        data = json.loads(jsone)
-
-        after_like = int(data['AccountInfo']['Likes'])
-        id = int(data['AccountInfo']['UID'])
-        name = str(data['AccountInfo']['PlayerNickname'])
-
-        like_given = after_like - before_like
-        status = 1 if like_given != 0 else 2
-
-        if like_given > 0:
-            token_tracker[token][0] += 1
-            count += 1
-
-        remains = KEY_LIMIT - count
-
-        result = {
-            "LikesGivenByAPI": like_given,
-            "LikesafterCommand": after_like,
-            "LikesbeforeCommand": before_like,
-            "PlayerNickname": name,
-            "UID": id,
-            "status": status,
-            "remains": f"({remains}/{KEY_LIMIT})"
-        }
-        return result
-
-    result = process_request()
-    return jsonify(result)
-
+# Render يستخدم gunicorn، لا داعي لـ app.run()
