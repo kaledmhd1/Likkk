@@ -31,13 +31,13 @@ def load_tokens(server_name):
 
 def make_request(uid, region):
     url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={region.lower()}"
-    response = requests.get(url)
-    if response.status_code != 200:
-        return {"error": f"Server returned {response.status_code}", "raw_response": response.text}
     try:
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return {"error": f"Server returned {response.status_code}", "raw_response": response.text}
         return response.json()
     except Exception as e:
-        return {"error": "Failed to parse JSON response", "debug": str(e), "raw_response": response.text}
+        return {"error": "Failed to connect or parse response", "debug": str(e)}
 
 async def send_request(uid, token, url):
     headers = {
@@ -99,16 +99,18 @@ def handle_requests():
             if "error" in before:
                 return {"error": "Failed to get player info before liking.", "debug": before}
 
-            before_like = int(before.get('likes', 0))
-            name = before.get('name', 'Unknown')
+            before_like = int(before.get('basicInfo', {}).get('liked', 0))
+            name = before.get('basicInfo', {}).get('nickname', 'Unknown')
 
+            # تحديد رابط الإرسال
             if server_name == "ME":
-                url = "https://razor-info.vercel.app/player-info?uid={uid}&region=me"
+                url = f"https://razor-info.vercel.app/player-info?uid={uid}&region=me"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
                 url = "https://clientbp.ggblueshark.com/LikeProfile"
 
+            # إرسال طلبات الإعجاب
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(send_multiple_requests(uid, server_name, url))
@@ -118,7 +120,7 @@ def handle_requests():
             if "error" in after:
                 return {"error": "Failed to get player info after liking.", "debug": after}
 
-            after_like = int(after.get('likes', 0))
+            after_like = int(after.get('basicInfo', {}).get('liked', 0))
             like_given = after_like - before_like
             status = 1 if like_given != 0 else 2
 
