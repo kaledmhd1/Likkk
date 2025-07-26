@@ -95,7 +95,7 @@ def enc(uid):
 
 def make_request(encrypt, server_name, token):
     if server_name == "ME":
-        url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
+        url = "https://client.me.freefiremobile.com/GetPlayerPersonalShow"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
     else:
@@ -177,7 +177,7 @@ def handle_requests():
 
             # Select URL
             if server_name == "ME":
-                url = "https://client.ind.freefiremobile.com/LikeProfile"
+                url = "https://client.me.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
