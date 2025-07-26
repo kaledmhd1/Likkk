@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bngx_king_walter   # غير هذا لاسم الخدمة اللي تبغاه
+    env: python
+    region: oregon             # غيرها حسب منطقتك المفضلة (مثل virginia أو frankfurt)
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: API_KEY
+        value: jenil            # مثال على مفتاح API تستخدمه في كودك (عدل حسب حاجتك)
+    autoDeploy: true
+    branch: main
