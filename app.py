@@ -1,5 +1,3 @@
-# this code was made by cutehack - Modified for Render by ChatGPT
-
 from flask import Flask, request, jsonify
 import asyncio
 from Crypto.Cipher import AES
@@ -19,7 +17,6 @@ import traceback
 
 app = Flask(__name__)
 
-# ✅ Per-key rate limit setup
 KEY_LIMIT = 150
 token_tracker = defaultdict(lambda: [0, time.time()])  # token: [count, last_reset_time]
 
@@ -93,6 +90,16 @@ def enc(uid):
     encrypted_uid = encrypt_message(protobuf_data)
     return encrypted_uid
 
+def decode_protobuf(binary):
+    try:
+        items = like_count_pb2.Info()
+        items.ParseFromString(binary)
+        return items
+    except Exception as e:
+        print(f"Error decoding Protobuf data: {e}")
+        print("Data (hex):", binary.hex())
+        return None
+
 def make_request(encrypt, server_name, token):
     if server_name == "ME":
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
@@ -115,18 +122,16 @@ def make_request(encrypt, server_name, token):
     }
 
     response = requests.post(url, data=edata, headers=headers, verify=False)
-    hex_data = response.content.hex()
-    binary = bytes.fromhex(hex_data)
-    return decode_protobuf(binary)
 
-def decode_protobuf(binary):
-    try:
-        items = like_count_pb2.Info()
-        items.ParseFromString(binary)
-        return items
-    except Exception as e:
-        print(f"Error decoding Protobuf data: {e}")
+    print("make_request: status_code =", response.status_code)
+    print("make_request: response content (hex) =", response.content.hex())
+
+    if response.status_code != 200:
+        print(f"make_request: Unexpected status code {response.status_code}")
         return None
+
+    binary = bytes.fromhex(response.content.hex())
+    return decode_protobuf(binary)
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
@@ -161,11 +166,13 @@ def handle_requests():
                 }
 
             before = make_request(encrypt, server_name, token)
+            if before is None:
+                return {"error": "Failed to get player info before liking."}
+
             jsone = MessageToJson(before)
             data = json.loads(jsone)
             before_like = int(data['AccountInfo'].get('Likes', 0))
 
-            # Select URL
             if server_name == "ME":
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
@@ -175,40 +182,3 @@ def handle_requests():
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(send_multiple_requests(uid, server_name, url))
-            loop.close()
-
-            after = make_request(encrypt, server_name, token)
-            jsone = MessageToJson(after)
-            data = json.loads(jsone)
-
-            after_like = int(data['AccountInfo']['Likes'])
-            id = int(data['AccountInfo']['UID'])
-            name = str(data['AccountInfo']['PlayerNickname'])
-
-            like_given = after_like - before_like
-            status = 1 if like_given != 0 else 2
-
-            if like_given > 0:
-                token_tracker[token][0] += 1
-                count += 1
-
-            remains = KEY_LIMIT - count
-
-            result = {
-                "LikesGivenByAPI": like_given,
-                "LikesafterCommand": after_like,
-                "LikesbeforeCommand": before_like,
-                "PlayerNickname": name,
-                "UID": id,
-                "status": status,
-                "remains": f"({remains}/{KEY_LIMIT})"
-            }
-            return result
-
-        result = process_request()
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
-
-# Render يستخدم gunicorn، لا داعي لـ app.run()
