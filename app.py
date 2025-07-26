@@ -30,7 +30,7 @@ def load_tokens(server_name):
             return json.load(f)
 
 def make_request(uid, region):
-    url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={region.lower()}"
+    url = f"https://api.jeff-gherab.xyz/api/like/v1/send"
     try:
         response = requests.get(url, timeout=10)
         if response.status_code != 200:
@@ -104,7 +104,7 @@ def handle_requests():
 
             # تحديد رابط الإرسال
             if server_name == "ME":
-                url = f"https://api.jeff-gherab.xyz/api/like/v1/send"
+                url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={region.lower()}"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
