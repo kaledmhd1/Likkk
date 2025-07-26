@@ -103,7 +103,7 @@ def handle_requests():
             name = before.get('name', 'Unknown')
 
             if server_name == "ME":
-                url = "https://client.me.freefiremobile.com/LikeProfile"
+                url = "https://razor-info.vercel.app/player-info?uid={uid}&region=me"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
