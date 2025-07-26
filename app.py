@@ -1,17 +1,8 @@
-# this code was made by cutehack - Modified for Render by ChatGPT
-
 from flask import Flask, request, jsonify
 import asyncio
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
-from google.protobuf.json_format import MessageToJson
-import binascii
 import aiohttp
 import requests
 import json
-import like_pb2
-import like_count_pb2
-import uid_generator_pb2
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -19,9 +10,8 @@ import traceback
 
 app = Flask(__name__)
 
-# ✅ Per-key rate limit setup
 KEY_LIMIT = 150
-token_tracker = defaultdict(lambda: [0, time.time()])  # token: [count, last_reset_time]
+token_tracker = defaultdict(lambda: [0, time.time()])
 
 def get_today_midnight_timestamp():
     now = datetime.now()
@@ -39,22 +29,17 @@ def load_tokens(server_name):
         with open("token_bd.json", "r") as f:
             return json.load(f)
 
-def encrypt_message(plaintext):
-    key = b'Yg&tc%DEuh6%Zc^8'
-    iv = b'6oyZDr22E3ychjM%'
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    padded_message = pad(plaintext, AES.block_size)
-    encrypted_message = cipher.encrypt(padded_message)
-    return binascii.hexlify(encrypted_message).decode('utf-8')
+def make_request(uid, region):
+    url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={region.lower()}"
+    response = requests.get(url)
+    if response.status_code != 200:
+        return {"error": f"Server returned {response.status_code}", "raw_response": response.text}
+    try:
+        return response.json()
+    except Exception as e:
+        return {"error": "Failed to parse JSON response", "debug": str(e), "raw_response": response.text}
 
-def create_protobuf_message(user_id, region):
-    message = like_pb2.like()
-    message.uid = int(user_id)
-    message.region = region
-    return message.SerializeToString()
-
-async def send_request(encrypted_uid, token, url):
-    edata = bytes.fromhex(encrypted_uid)
+async def send_request(uid, token, url):
     headers = {
         'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
         'Connection': "Keep-Alive",
@@ -67,73 +52,17 @@ async def send_request(encrypted_uid, token, url):
         'ReleaseVersion': "OB49"
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=edata, headers=headers) as response:
+        async with session.post(url, data={"uid": uid}, headers=headers) as response:
             return response.status
 
 async def send_multiple_requests(uid, server_name, url):
-    region = server_name
-    protobuf_message = create_protobuf_message(uid, region)
-    encrypted_uid = encrypt_message(protobuf_message)
     tasks = []
     tokens = load_tokens(server_name)
     for i in range(100):
         token = tokens[i % len(tokens)]["token"]
-        tasks.append(send_request(encrypted_uid, token, url))
+        tasks.append(send_request(uid, token, url))
     results = await asyncio.gather(*tasks)
     return results
-
-def create_protobuf(uid):
-    message = uid_generator_pb2.uid_generator()
-    message.krishna_ = int(uid)
-    message.teamXdarks = 1
-    return message.SerializeToString()
-
-def enc(uid):
-    protobuf_data = create_protobuf(uid)
-    encrypted_uid = encrypt_message(protobuf_data)
-    return encrypted_uid
-
-def make_request(encrypt, server_name, token):
-    if server_name == "ME":
-        url = "https://client.me.freefiremobile.com/GetPlayerPersonalShow"
-    elif server_name in {"BR", "US", "SAC", "NA"}:
-        url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
-    else:
-        url = "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
-
-    edata = bytes.fromhex(encrypt)
-    headers = {
-        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-        'Connection': "Keep-Alive",
-        'Accept-Encoding': "gzip",
-        'Authorization': f"Bearer {token}",
-        'Content-Type': "application/x-www-form-urlencoded",
-        'Expect': "100-continue",
-        'X-Unity-Version': "2018.4.11f1",
-        'X-GA': "v1 1",
-        'ReleaseVersion': "OB49"
-    }
-
-    response = requests.post(url, data=edata, headers=headers, verify=False)
-    raw_hex = response.content.hex()
-
-    if response.status_code != 200:
-        return {"error": f"Server returned {response.status_code}", "raw_response_hex": raw_hex}
-
-    parsed = decode_protobuf(response.content)
-    if parsed is None:
-        return {"error": "Failed to parse protobuf", "raw_response_hex": raw_hex}
-
-    return parsed
-
-def decode_protobuf(binary):
-    try:
-        items = like_count_pb2.Info()
-        items.ParseFromString(binary)
-        return items
-    except Exception as e:
-        print(f"Protobuf parse error: {e}")
-        return None
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
@@ -149,11 +78,10 @@ def handle_requests():
             return jsonify({"error": "UID and server_name are required"}), 400
 
         def process_request():
+            uid_int = int(uid)
+            today_midnight = get_today_midnight_timestamp()
             data = load_tokens(server_name)
             token = data[0]['token']
-            encrypt = enc(uid)
-
-            today_midnight = get_today_midnight_timestamp()
             count, last_reset = token_tracker[token]
 
             if last_reset < today_midnight:
@@ -167,15 +95,13 @@ def handle_requests():
                     "remains": f"(0/{KEY_LIMIT})"
                 }
 
-            before = make_request(encrypt, server_name, token)
-            if isinstance(before, dict) and "error" in before:
+            before = make_request(uid_int, server_name)
+            if "error" in before:
                 return {"error": "Failed to get player info before liking.", "debug": before}
 
-            jsone = MessageToJson(before)
-            data = json.loads(jsone)
-            before_like = int(data['AccountInfo'].get('Likes', 0))
+            before_like = int(before.get('likes', 0))
+            name = before.get('name', 'Unknown')
 
-            # Select URL
             if server_name == "ME":
                 url = "https://client.me.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
@@ -188,17 +114,11 @@ def handle_requests():
             loop.run_until_complete(send_multiple_requests(uid, server_name, url))
             loop.close()
 
-            after = make_request(encrypt, server_name, token)
-            if isinstance(after, dict) and "error" in after:
+            after = make_request(uid_int, server_name)
+            if "error" in after:
                 return {"error": "Failed to get player info after liking.", "debug": after}
 
-            jsone = MessageToJson(after)
-            data = json.loads(jsone)
-
-            after_like = int(data['AccountInfo']['Likes'])
-            id = int(data['AccountInfo']['UID'])
-            name = str(data['AccountInfo']['PlayerNickname'])
-
+            after_like = int(after.get('likes', 0))
             like_given = after_like - before_like
             status = 1 if like_given != 0 else 2
 
@@ -208,18 +128,20 @@ def handle_requests():
 
             remains = KEY_LIMIT - count
 
-            result = {
+            return {
                 "LikesGivenByAPI": like_given,
                 "LikesafterCommand": after_like,
                 "LikesbeforeCommand": before_like,
                 "PlayerNickname": name,
-                "UID": id,
+                "UID": uid_int,
                 "status": status,
                 "remains": f"({remains}/{KEY_LIMIT})"
             }
-            return result
 
         result = process_request()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
