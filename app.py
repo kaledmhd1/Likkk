@@ -94,7 +94,7 @@ def enc(uid):
     return encrypted_uid
 
 def make_request(encrypt, server_name, token):
-    if server_name == "IND":
+    if server_name == "ME":
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
@@ -166,7 +166,7 @@ def handle_requests():
             before_like = int(data['AccountInfo'].get('Likes', 0))
 
             # Select URL
-            if server_name == "IND":
+            if server_name == "ME":
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
