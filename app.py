@@ -1,3 +1,5 @@
+# this code was made by cutehack - Modified for Render by ChatGPT
+
 from flask import Flask, request, jsonify
 import asyncio
 from Crypto.Cipher import AES
@@ -17,6 +19,7 @@ import traceback
 
 app = Flask(__name__)
 
+# ✅ Per-key rate limit setup
 KEY_LIMIT = 150
 token_tracker = defaultdict(lambda: [0, time.time()])  # token: [count, last_reset_time]
 
@@ -90,16 +93,6 @@ def enc(uid):
     encrypted_uid = encrypt_message(protobuf_data)
     return encrypted_uid
 
-def decode_protobuf(binary):
-    try:
-        items = like_count_pb2.Info()
-        items.ParseFromString(binary)
-        return items
-    except Exception as e:
-        print(f"Error decoding Protobuf data: {e}")
-        print("Data (hex):", binary.hex())
-        return None
-
 def make_request(encrypt, server_name, token):
     if server_name == "ME":
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
@@ -122,15 +115,25 @@ def make_request(encrypt, server_name, token):
     }
 
     response = requests.post(url, data=edata, headers=headers, verify=False)
-
-    print("make_request: status_code =", response.status_code)
-    print("make_request: response content (hex) =", response.content.hex())
+    raw_hex = response.content.hex()
 
     if response.status_code != 200:
-        print(f"make_request: Unexpected status code {response.status_code}")
-        return None
+        return {"error": f"Server returned {response.status_code}", "raw_response_hex": raw_hex}
 
-    return decode_protobuf(response.content)
+    parsed = decode_protobuf(response.content)
+    if parsed is None:
+        return {"error": "Failed to parse protobuf", "raw_response_hex": raw_hex}
+
+    return parsed
+
+def decode_protobuf(binary):
+    try:
+        items = like_count_pb2.Info()
+        items.ParseFromString(binary)
+        return items
+    except Exception as e:
+        print(f"Protobuf parse error: {e}")
+        return None
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
@@ -165,13 +168,14 @@ def handle_requests():
                 }
 
             before = make_request(encrypt, server_name, token)
-            if before is None:
-                return {"error": "Failed to get player info before liking."}
+            if isinstance(before, dict) and "error" in before:
+                return {"error": "Failed to get player info before liking.", "debug": before}
 
             jsone = MessageToJson(before)
             data = json.loads(jsone)
             before_like = int(data['AccountInfo'].get('Likes', 0))
 
+            # Select URL
             if server_name == "ME":
                 url = "https://client.ind.freefiremobile.com/LikeProfile"
             elif server_name in {"BR", "US", "SAC", "NA"}:
@@ -185,8 +189,8 @@ def handle_requests():
             loop.close()
 
             after = make_request(encrypt, server_name, token)
-            if after is None:
-                return {"error": "Failed to get player info after liking."}
+            if isinstance(after, dict) and "error" in after:
+                return {"error": "Failed to get player info after liking.", "debug": after}
 
             jsone = MessageToJson(after)
             data = json.loads(jsone)
