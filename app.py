@@ -221,7 +221,7 @@ def handle_requests():
             name = before.get('basicInfo', {}).get('nickname', 'Unknown')
 
             # **رابط الإعجابات الجديد**
-            url = "https://api.jeff-gherab.xyz/api/like/v1/send"
+            url = "https://client.me.freefiremobile.com/LikeProfile"
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
