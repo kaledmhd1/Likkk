@@ -153,7 +153,12 @@ def make_request(uid, server_name):
         return {"error": "Failed to connect or parse response", "debug": str(e)}
 
 
-# ============= راوت الفحص =============
+# ============= الراوت =============
+@app.route("/")
+def home():
+    return jsonify({"status": "live", "tokens_loaded": len(TOKENS)})
+
+
 @app.route("/tokens", methods=["GET"])
 def show_tokens():
     with LOCK:
@@ -165,8 +170,6 @@ if __name__ == "__main__":
     logging.info("=== بدء تشغيل السيرفر (DEBUG MODE) ===")
     logging.info(f"[main] Working Dir: {os.getcwd()}")
     logging.info(f"[main] accs.txt موجود؟ {os.path.exists(ACCS_FILE)}")
-
-    # فحص ملفات المسار
     logging.info(f"[main] Files in dir: {os.listdir(os.getcwd())}")
 
     # اختبار الاتصال مع API
@@ -175,4 +178,7 @@ if __name__ == "__main__":
     # محاولة جلب التوكنات
     refresh_tokens()
 
-    app.run(host="0.0.0.0", port=5000)
+    # تشغيل السيرفر على منفذ Render
+    port = int(os.environ.get("PORT", 5000))
+    logging.info(f"[main] Starting app on port {port}")
+    app.run(host="0.0.0.0", port=port)
