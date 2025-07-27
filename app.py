@@ -34,10 +34,6 @@ token_thread = None
 # ====================== جزء: توليد وتجديد التوكنات ======================
 
 def fetch_jwt(uid: str, password: str, timeout: int = 10):
-    """
-    يجلب JWT من API:
-    https://jwt-gen-api-v2.onrender.com/token?uid={uid}&password={password}
-    """
     url = "https://jwt-gen-api-v2.onrender.com/token"
     try:
         r = requests.get(url, params={"uid": uid, "password": password}, timeout=timeout)
@@ -50,11 +46,6 @@ def fetch_jwt(uid: str, password: str, timeout: int = 10):
         return {"error": str(e)}
 
 def renew_me_tokens():
-    """
-    - يقرأ accs.txt
-    - يجلب JWT لكل حساب
-    - يكتب token_ind.json بالشكل: [ { "token": "..." }, ... ]
-    """
     logging.info("تجديد ME tokens من accs.txt ...")
 
     if not ACCS_FILE.exists():
@@ -90,9 +81,6 @@ def renew_me_tokens():
         logging.exception("فشل في كتابة token_ind.json")
 
 def _token_refresher_loop(stop_event: threading.Event):
-    """
-    حلقة تعمل في الخلفية لتجديد التوكنات كل ساعة.
-    """
     try:
         renew_me_tokens()
     except Exception:
@@ -105,9 +93,6 @@ def _token_refresher_loop(stop_event: threading.Event):
             logging.exception("خطأ أثناء التجديد الدوري للتوكنات")
 
 def ensure_token_thread_started():
-    """
-    يبدأ ثريد التجديد مرة واحدة فقط (يُستدعى من before_first_request).
-    """
     global token_thread
     if token_thread is None or not token_thread.is_alive():
         logging.info("بدء خيط تجديد التوكنات...")
@@ -118,14 +103,10 @@ def ensure_token_thread_started():
         )
         token_thread.start()
 
-@app.before_first_request
-def _start_background_services():
-    ensure_token_thread_started()
-
 # ==================================================================
 
 
-# ====================== جزء: أدواتك الأصلية ========================
+# ====================== جزء: الأدوات ========================
 
 def get_today_midnight_timestamp():
     now = datetime.now()
@@ -133,12 +114,6 @@ def get_today_midnight_timestamp():
     return midnight.timestamp()
 
 def load_tokens(server_name):
-    """
-    قراءة التوكنات حسب السيرفر.
-    - ME: من token_ind.json بالشكل [ { "token": "..." }, ... ]
-    - BR/US/SAC/NA: من token_br.json (حافظت على منطقك)
-    - غير ذلك: من token_bd.json
-    """
     file_map = {
         "ME": "token_ind.json",
         "BR": "token_br.json",
@@ -151,9 +126,7 @@ def load_tokens(server_name):
     try:
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # نتأكد أنها قائمة
             if isinstance(data, dict):
-                # fallback لو كانت dict بالخطأ
                 data = [{"token": v} for v in data.values()]
             return data
     except FileNotFoundError:
@@ -247,16 +220,13 @@ def handle_requests():
             before_like = int(before.get('basicInfo', {}).get('liked', 0))
             name = before.get('basicInfo', {}).get('nickname', 'Unknown')
 
-            # اختيار رابط الإرسال
             if server_name == "ME":
-                # (أبقيت على منطقك كما هو)
                 url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={server_name.lower()}"
             elif server_name in {"BR", "US", "SAC", "NA"}:
                 url = "https://client.us.freefiremobile.com/LikeProfile"
             else:
                 url = "https://api.jeff-gherab.xyz/api/like/v1/send"
 
-            # إرسال طلبات الإعجاب
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -297,6 +267,5 @@ def handle_requests():
 
 
 if __name__ == "__main__":
-    # ملاحظة: مع debug=True قد يشغل Flask الكود مرتين (reloader)،
-    # لذا نعتمد على before_first_request لتشغيل الثريد مرة واحدة.
+    ensure_token_thread_started()
     app.run(host="0.0.0.0", port=5000)
