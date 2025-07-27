@@ -220,12 +220,8 @@ def handle_requests():
             before_like = int(before.get('basicInfo', {}).get('liked', 0))
             name = before.get('basicInfo', {}).get('nickname', 'Unknown')
 
-            if server_name == "ME":
-                url = f"https://client.me.freefiremobile.com/LikeProfile}"
-            elif server_name in {"BR", "US", "SAC", "NA"}:
-                url = "https://client.us.freefiremobile.com/LikeProfile"
-            else:
-                url = "https://api.jeff-gherab.xyz/api/like/v1/send"
+            # **رابط الإعجابات الجديد**
+            url = "https://api.jeff-gherab.xyz/api/like/v1/send"
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
