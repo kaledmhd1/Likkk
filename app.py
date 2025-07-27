@@ -1,32 +1,26 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 import threading
 import time
 import json
+import logging
+import os
+import signal
+from types import MappingProxyType
 import requests
-import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import logging
-import asyncio
-import aiohttp
-from collections import defaultdict
-from datetime import datetime
-import os
-import traceback
 
 # ============= إعداد اللوج =============
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ============= إعدادات أساسية =============
 app = Flask(__name__)
-ACCS_FILE = "accs.txt"  # ملف الحسابات
-TOKENS = {}             # التوكنات في الذاكرة
+ACCS_FILE = os.getenv("ACCS_FILE", "accs.txt")  # ملف الحسابات
+TOKENS = MappingProxyType({})  # التوكنات في الذاكرة (قراءة فقط)
 LOCK = threading.Lock()
-KEY_LIMIT = 150
-token_tracker = defaultdict(lambda: [0, time.time()])
+STOP = threading.Event()
 
 # ============= إعداد requests مع retry =============
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 retry_strategy = Retry(
     total=5,
     backoff_factor=1,
@@ -39,146 +33,99 @@ session.mount("https://", adapter)
 session.mount("http://", adapter)
 
 
-# ============= اختبار الاتصال مع API =============
-def test_api_connection():
-    try:
-        url = "https://jwt-gen-api-v2.onrender.com/token?uid=3686947614&password=TEST"
-        logging.info(f"[TEST] Testing API connection: {url}")
-        r = session.get(url, verify=False, timeout=10)
-        logging.info(f"[TEST] Status: {r.status_code}, Response: {r.text[:200]}")
-    except Exception as e:
-        logging.error(f"[TEST] API connection failed: {e}")
-
-
 # ============= تحميل الحسابات =============
 def load_accounts():
     if not os.path.exists(ACCS_FILE):
-        logging.error(f"[DEBUG] {ACCS_FILE} not found in {os.getcwd()}")
-        logging.info(f"[DEBUG] Files here: {os.listdir(os.getcwd())}")
+        logging.error(f"ملف {ACCS_FILE} غير موجود")
         return {}
-    with open(ACCS_FILE, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        logging.info(f"[DEBUG] accs.txt content: {content}")
-        try:
+    try:
+        with open(ACCS_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
             data = json.loads(content or "{}")
-            logging.info(f"[DEBUG] Loaded {len(data)} accounts from accs.txt")
-            return data
-        except json.JSONDecodeError as e:
-            logging.error(f"[ERROR] Failed to parse JSON: {e}")
-            return {}
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.error(f"[ERROR] فشل قراءة الملف {ACCS_FILE}: {e}")
+        return {}
 
 
 # ============= جلب JWT من API =============
 def get_jwt(uid, password):
     api_url = f"https://jwt-gen-api-v2.onrender.com/token?uid={uid}&password={password}"
     try:
-        logging.info(f"[get_jwt] Requesting JWT for {uid}")
         response = session.get(api_url, verify=False, timeout=30)
-        logging.info(f"[get_jwt] Status: {response.status_code}, Response: {response.text[:150]}")
         if response.status_code == 200:
             token = response.json().get("token")
-            logging.info(f"[get_jwt] JWT for {uid}: {token}")
+            logging.info(f"[get_jwt] {uid} -> Token OK")
             return token
         else:
-            logging.error(f"[get_jwt] Failed for {uid}, status: {response.status_code}")
+            logging.error(f"[get_jwt] فشل {uid}, status: {response.status_code}")
     except Exception as e:
-        logging.error(f"[get_jwt] Exception for {uid}: {e}")
+        logging.error(f"[get_jwt] Exception: {e}")
     return None
 
 
-# ============= تحديث التوكنات كل ساعة =============
+# ============= تحديث التوكنات =============
 def refresh_tokens():
-    logging.info("[refresh_tokens] Starting refresh...")
+    logging.info("[refresh_tokens] تحديث التوكنات...")
     accounts = load_accounts()
     new_tokens = {}
     for uid, pw in accounts.items():
         token = get_jwt(uid, pw)
         if token:
             new_tokens[uid] = token
-            logging.info(f"[REFRESHED] {uid}")
         else:
             logging.warning(f"[FAILED] {uid}")
 
     with LOCK:
         global TOKENS
-        TOKENS = new_tokens
+        TOKENS = MappingProxyType(new_tokens)
 
-    logging.info(f"[INFO] Tokens refreshed: {len(TOKENS)} active.")
-    if TOKENS:
-        logging.info(f"[TOKENS] {TOKENS}")
-    else:
-        logging.warning("[TOKENS] No tokens loaded!")
-
-    threading.Timer(3600, refresh_tokens).start()  # إعادة التحديث بعد ساعة
+    logging.info(f"[refresh_tokens] عدد التوكنات: {len(TOKENS)}")
 
 
-# ============= أدوات مساعدة =============
-def get_today_midnight_timestamp():
-    now = datetime.now()
-    midnight = datetime(now.year, now.month, now.day)
-    return midnight.timestamp()
+# ============= تحديث التوكنات كل ساعة =============
+def refresh_tokens_loop():
+    while not STOP.is_set():
+        refresh_tokens()
+        STOP.wait(3600)  # انتظر ساعة
 
 
-async def send_request(uid, token, url):
-    headers = {
-        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-        'Connection': "Keep-Alive",
-        'Accept-Encoding': "gzip",
-        'Authorization': f"Bearer {token}",
-        'Content-Type': "application/x-www-form-urlencoded",
-        'Expect': "100-continue",
-        'X-Unity-Version': "2018.4.11f1",
-        'X-GA': "v1 1",
-        'ReleaseVersion': "OB49"
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data={"uid": uid}, headers=headers) as response:
-            return response.status
-
-
-async def send_multiple_requests(uid, token, url):
-    tasks = [send_request(uid, token, url) for _ in range(100)]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return results
-
-
-def make_request(uid, server_name):
-    url = f"https://razor-info.vercel.app/player-info?uid={uid}&region={server_name.lower()}"
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            return {"error": f"Server returned {response.status_code}", "raw_response": response.text}
-        return response.json()
-    except Exception as e:
-        return {"error": "Failed to connect or parse response", "debug": str(e)}
-
-
-# ============= الراوت =============
+# ============= المسارات =============
 @app.route("/")
 def home():
-    return jsonify({"status": "live", "tokens_loaded": len(TOKENS)})
+    with LOCK:
+        return jsonify({"status": "live", "tokens_loaded": len(TOKENS)})
 
 
 @app.route("/tokens", methods=["GET"])
 def show_tokens():
     with LOCK:
-        return jsonify(TOKENS if TOKENS else {"error": "No tokens loaded yet"})
+        return jsonify(dict(TOKENS) if TOKENS else {"error": "لا يوجد توكنات بعد"})
+
+
+@app.route("/force_refresh", methods=["POST", "GET"])
+def force_refresh():
+    refresh_tokens()
+    return jsonify({"status": "تم التحديث", "tokens_loaded": len(TOKENS)})
+
+
+# ============= الإغلاق الآمن =============
+def handle_shutdown(signum, frame):
+    logging.info("إيقاف السيرفر...")
+    STOP.set()
 
 
 # ============= تشغيل السيرفر =============
 if __name__ == "__main__":
-    logging.info("=== بدء تشغيل السيرفر (DEBUG MODE) ===")
-    logging.info(f"[main] Working Dir: {os.getcwd()}")
-    logging.info(f"[main] accs.txt موجود؟ {os.path.exists(ACCS_FILE)}")
-    logging.info(f"[main] Files in dir: {os.listdir(os.getcwd())}")
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
 
-    # اختبار الاتصال مع API
-    test_api_connection()
-
-    # محاولة جلب التوكنات
+    # تحديث التوكنات مباشرة عند بدء التشغيل
     refresh_tokens()
 
-    # تشغيل السيرفر على منفذ Render
-    port = int(os.environ.get("PORT", 5000))
-    logging.info(f"[main] Starting app on port {port}")
+    # تشغيل التحديث الدوري في ثريد مستقل
+    t = threading.Thread(target=refresh_tokens_loop, daemon=True)
+    t.start()
+
+    port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
