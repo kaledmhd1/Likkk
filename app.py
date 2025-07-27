@@ -39,13 +39,26 @@ session.mount("https://", adapter)
 session.mount("http://", adapter)
 
 
+# ============= اختبار الاتصال مع API =============
+def test_api_connection():
+    try:
+        url = "https://jwt-gen-api-v2.onrender.com/token?uid=3686947614&password=TEST"
+        logging.info(f"[TEST] Testing API connection: {url}")
+        r = session.get(url, verify=False, timeout=10)
+        logging.info(f"[TEST] Status: {r.status_code}, Response: {r.text[:200]}")
+    except Exception as e:
+        logging.error(f"[TEST] API connection failed: {e}")
+
+
 # ============= تحميل الحسابات =============
 def load_accounts():
     if not os.path.exists(ACCS_FILE):
-        logging.error(f"{ACCS_FILE} not found!")
+        logging.error(f"[DEBUG] {ACCS_FILE} not found in {os.getcwd()}")
+        logging.info(f"[DEBUG] Files here: {os.listdir(os.getcwd())}")
         return {}
     with open(ACCS_FILE, "r", encoding="utf-8") as f:
         content = f.read().strip()
+        logging.info(f"[DEBUG] accs.txt content: {content}")
         try:
             data = json.loads(content or "{}")
             logging.info(f"[DEBUG] Loaded {len(data)} accounts from accs.txt")
@@ -61,12 +74,13 @@ def get_jwt(uid, password):
     try:
         logging.info(f"[get_jwt] Requesting JWT for {uid}")
         response = session.get(api_url, verify=False, timeout=30)
+        logging.info(f"[get_jwt] Status: {response.status_code}, Response: {response.text[:150]}")
         if response.status_code == 200:
             token = response.json().get("token")
             logging.info(f"[get_jwt] JWT for {uid}: {token}")
             return token
         else:
-            logging.error(f"[get_jwt] Failed for {uid}, status: {response.status_code}, response={response.text}")
+            logging.error(f"[get_jwt] Failed for {uid}, status: {response.status_code}")
     except Exception as e:
         logging.error(f"[get_jwt] Exception for {uid}: {e}")
     return None
@@ -92,9 +106,10 @@ def refresh_tokens():
     logging.info(f"[INFO] Tokens refreshed: {len(TOKENS)} active.")
     if TOKENS:
         logging.info(f"[TOKENS] {TOKENS}")
+    else:
+        logging.warning("[TOKENS] No tokens loaded!")
 
-    # إعادة التحديث بعد ساعة
-    threading.Timer(3600, refresh_tokens).start()
+    threading.Timer(3600, refresh_tokens).start()  # إعادة التحديث بعد ساعة
 
 
 # ============= أدوات مساعدة =============
@@ -138,86 +153,26 @@ def make_request(uid, server_name):
         return {"error": "Failed to connect or parse response", "debug": str(e)}
 
 
-# ============= الراوت =============
-@app.route('/like', methods=['GET'])
-def handle_like():
-    try:
-        uid = request.args.get("uid")
-        server_name = request.args.get("server_name", "").upper()
-        key = request.args.get("key")
-
-        if key != "jenil":
-            return jsonify({"error": "Invalid or missing API key 🔑"}), 403
-        if not uid or not server_name:
-            return jsonify({"error": "UID and server_name are required"}), 400
-
-        uid_int = int(uid)
-        today_midnight = get_today_midnight_timestamp()
-
-        with LOCK:
-            if not TOKENS:
-                return jsonify({"error": "No tokens loaded yet. Please wait."}), 503
-            token = list(TOKENS.values())[0]  # استخدام أول توكن
-
-        count, last_reset = token_tracker[token]
-        if last_reset < today_midnight:
-            token_tracker[token] = [0, time.time()]
-            count = 0
-
-        if count >= KEY_LIMIT:
-            return jsonify({
-                "error": "Daily request limit reached for this key.",
-                "status": 429,
-                "remains": f"(0/{KEY_LIMIT})"
-            }), 429
-
-        before = make_request(uid_int, server_name)
-        if "error" in before:
-            return jsonify({"error": "Failed to get player info before liking.", "debug": before})
-
-        before_like = int(before.get('basicInfo', {}).get('liked', 0))
-        name = before.get('basicInfo', {}).get('nickname', 'Unknown')
-
-        url_like = "https://client.me.freefiremobile.com/LikeProfile"
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(send_multiple_requests(uid, token, url_like))
-        finally:
-            loop.close()
-
-        after = make_request(uid_int, server_name)
-        if "error" in after:
-            return jsonify({"error": "Failed to get player info after liking.", "debug": after})
-
-        after_like = int(after.get('basicInfo', {}).get('liked', 0))
-        like_given = after_like - before_like
-        status = 1 if like_given != 0 else 2
-
-        if like_given > 0:
-            token_tracker[token][0] += 1
-            count += 1
-
-        remains = KEY_LIMIT - count
-        return jsonify({
-            "LikesGivenByAPI": like_given,
-            "LikesafterCommand": after_like,
-            "LikesbeforeCommand": before_like,
-            "PlayerNickname": name,
-            "UID": uid_int,
-            "status": status,
-            "remains": f"({remains}/{KEY_LIMIT})"
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+# ============= راوت الفحص =============
+@app.route("/tokens", methods=["GET"])
+def show_tokens():
+    with LOCK:
+        return jsonify(TOKENS if TOKENS else {"error": "No tokens loaded yet"})
 
 
 # ============= تشغيل السيرفر =============
 if __name__ == "__main__":
-    logging.info("=== بدء تشغيل السيرفر ===")
+    logging.info("=== بدء تشغيل السيرفر (DEBUG MODE) ===")
     logging.info(f"[main] Working Dir: {os.getcwd()}")
     logging.info(f"[main] accs.txt موجود؟ {os.path.exists(ACCS_FILE)}")
 
-    refresh_tokens()  # جلب التوكنات عند البداية
+    # فحص ملفات المسار
+    logging.info(f"[main] Files in dir: {os.listdir(os.getcwd())}")
+
+    # اختبار الاتصال مع API
+    test_api_connection()
+
+    # محاولة جلب التوكنات
+    refresh_tokens()
+
     app.run(host="0.0.0.0", port=5000)
